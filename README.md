@@ -12,19 +12,17 @@ Play UNO No Mercy with friends, each on your own phone. One person creates a roo
 - **UNO** call with a *Catch!* button (+2 penalty)
 - Scoring: numbers face value, coloured actions 20, wilds 50, +250 per knockout; first to 1,000
 
-## Run locally
-```
-node server.js        # http://localhost:3000
-npm test              # 3,000 simulated games + full HTTP test
-```
-No dependencies — just Node 18+.
+## How it works — no server needed
+The site is plain HTML hosted free on **GitHub Pages**. When you create a room, **your phone becomes the game server**; friends' phones connect straight to it (WebRTC via PeerJS). So the host must keep the game open on screen until the game ends.
 
-## Put it online (free) so friends on other phones can join
-**Render.com**: New → Blueprint (or Web Service) → connect this repo. It reads `render.yaml` (start command `node server.js`). You get a URL like `https://uno-no-mercy.onrender.com` — share that.
+## Put it online (one time)
+Repo **Settings → Pages → Source: Deploy from a branch → Branch: `main`, folder: `/docs` → Save**.
+After ~1 minute the game is live at:
 
-Free Render instances sleep after ~15 minutes idle; the first visit takes ~30 s to wake up. Rooms live in memory, so a restart clears them.
+**https://chinmaybitsfilter-ctrl.github.io/uno-no-mercy/**
 
 ## Files
-- `game.js` — rules engine
-- `server.js` — rooms + real-time updates (Server-Sent Events)
-- `public/index.html` — the phone UI
+- `docs/index.html` — the phone UI + peer-to-peer networking
+- `docs/room.js` — room logic (runs on the host's phone)
+- `docs/game.js` — rules engine
+- `test/sim.js` — 3,000 simulated games (`npm test`)

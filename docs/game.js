@@ -1,7 +1,12 @@
 // UNO Show 'Em No Mercy — game engine (pure logic, no networking)
 // Rules follow Mattel's official No Mercy instruction sheet (HVW18).
+(function (root) {
 'use strict';
-const crypto = require('crypto');
+function randInt(n) { // unbiased random int in [0, n), works in browsers and Node
+  const lim = Math.floor(0x100000000 / n) * n, b = new Uint32Array(1);
+  do { globalThis.crypto.getRandomValues(b); } while (b[0] >= lim);
+  return b[0] % n;
+}
 
 const COLORS = ['red', 'yellow', 'green', 'blue'];
 const DRAW_VALUE = { draw2: 2, draw4: 4, wildRev4: 4, wild6: 6, wild10: 10 };
@@ -11,7 +16,7 @@ const MAX_LOG = 40;
 
 function shuffle(a) {
   for (let i = a.length - 1; i > 0; i--) {
-    const j = crypto.randomInt(i + 1);
+    const j = randInt(i + 1);
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
@@ -399,4 +404,6 @@ class Game {
   }
 }
 
-module.exports = { Game, buildDeck, COLORS, DRAW_VALUE, cardName };
+const api = { Game, buildDeck, COLORS, DRAW_VALUE, cardName, randInt };
+if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.UnoEngine = api;
+})(typeof window !== 'undefined' ? window : globalThis);

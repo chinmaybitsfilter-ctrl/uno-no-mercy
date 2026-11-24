@@ -1,5 +1,5 @@
 // Random-bot simulation: plays many hands and checks invariants.
-const { Game, COLORS } = require('../game');
+const { Game, COLORS } = require('../docs/game.js');
 const assert = require('assert');
 const pick = a => a[Math.floor(Math.random() * a.length)];
 

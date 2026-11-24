@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: uno-no-mercy
-    runtime: node
-    plan: free
-    buildCommand: echo "no dependencies"
-    startCommand: node server.js
-    healthCheckPath: /healthz

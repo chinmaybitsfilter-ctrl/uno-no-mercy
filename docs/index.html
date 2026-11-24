@@ -93,7 +93,7 @@ label{font-size:13px;color:var(--dim);display:block;margin-bottom:5px}
 .card.wild .oval{background:#111}
 .card .big{position:relative;font-size:24px;color:var(--c);text-shadow:1px 1px 0 #0003;text-align:center;line-height:1}
 .card.wild .big{color:#fff}
-.card .big.sm{font-size:9.5px;line-height:1.1;letter-spacing:-.2px}
+.card .big.sm{font-size:8.5px;line-height:1.1;letter-spacing:-.3px}
 .card .corner{position:absolute;top:3px;left:5px;font-size:11px;text-shadow:1px 1px 0 #0006}
 .card .corner.br{top:auto;left:auto;bottom:3px;right:5px;transform:rotate(180deg)}
 .card.back{background:#111;--c:#111}
@@ -133,6 +133,7 @@ label{font-size:13px;color:var(--dim);display:block;margin-bottom:5px}
 .feed{font-size:12px;color:var(--dim);text-align:center;min-height:16px;padding:0 12px;max-width:520px}
 .over h2{text-align:center;font-size:26px;margin:4px 0}
 .score{display:flex;justify-content:space-between;padding:9px 12px;background:#1a0d0e;border-radius:10px}
+.netbanner{position:fixed;left:0;right:0;bottom:0;background:#4b3608;color:#ffd75e;text-align:center;font-size:13px;font-weight:700;padding:8px;z-index:70}
 .rules ul{padding-left:18px;margin:0;font-size:14px;line-height:1.5;color:#e8d7d7}
 </style>
 </head>
@@ -274,6 +275,10 @@ label{font-size:13px;color:var(--dim);display:block;margin-bottom:5px}
 
 <div id="toast" class="toast hidden"></div>
 
+<div id="netBanner" class="netbanner hidden"></div>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="game.js"></script>
+<script src="room.js"></script>
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
@@ -288,13 +293,13 @@ function toast(msg, ms = 2600) {
   const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add('hidden'), ms);
 }
-async function api(path, body) {
-  const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  const j = await r.json().catch(() => ({ error:'Network error' }));
-  if (!r.ok) throw new Error(j.error || 'Error');
-  return j;
+function banner(msg) { $('netBanner').textContent = msg || ''; $('netBanner').classList.toggle('hidden', !msg); }
+function act(type, extra = {}) {
+  if (!session) return;
+  if (session.role === 'host') return hostLocalAct({ type, ...extra });
+  if (!net.conn || !net.conn.open) return toast('Not connected to the host yet…');
+  net.conn.send(JSON.stringify({ t: 'act', type, ...extra }));
 }
-const act = (type, extra = {}) => api('/api/act', { code: session.code, token: session.token, type, ...extra }).catch(e => toast(e.message));
 function show(id) { for (const s of ['home','lobby','game']) $(s).classList.toggle('hidden', s !== id); }
 function openM(id) { $(id).classList.remove('hidden'); }
 function closeM(id) { $(id).classList.add('hidden'); }
@@ -310,7 +315,7 @@ function cardHTML(c, cls = '') {
   return `<div class="card ${c.color} ${cls}" data-id="${c.id}"><div class="oval"></div><span class="corner">${label}</span><div class="big${sm}">${big}</div><span class="corner br">${label}</span></div>`;
 }
 const nameOf = id => (S.players.find(p => p.id === id) || {}).name || '?';
-const inviteLink = () => `${location.origin}/?room=${session.code}`;
+const inviteLink = () => `${location.origin}${location.pathname}?room=${session.code}`;
 async function shareInvite() {
   const text = `Join my UNO No Mercy game! Room ${session.code}`;
   if (navigator.share) { try { await navigator.share({ title:'UNO No Mercy', text, url: inviteLink() }); return; } catch {} }
@@ -332,50 +337,183 @@ function getName() {
   if (!n) { $('homeErr').textContent = 'Enter your name first'; $('name').focus(); return null; }
   localStorage.setItem('uno_name', n); return n;
 }
-$('createBtn').onclick = async () => {
+$('createBtn').onclick = () => {
   const name = getName(); if (!name) return;
-  try { const r = await api('/api/create', { name, maxPlayers: maxP }); enter(r); } catch (e) { $('homeErr').textContent = e.message; }
+  if (typeof Peer === 'undefined') { $('homeErr').textContent = 'Could not load the network library — check your internet'; return; }
+  const room = new UnoRoom.Room(UnoRoom.newCode(), maxP);
+  const me = room.addMember(name);
+  session = { code: room.code, token: me.token, role: 'host' };
+  saveSession(); startHost(room);
 };
-$('joinBtn').onclick = async () => {
+$('joinBtn').onclick = () => {
   const name = getName(); if (!name) return;
   const code = $('joinCode').value.trim().toUpperCase();
-  if (!code) { $('homeErr').textContent = 'Enter the room code'; return; }
-  try { const r = await api('/api/join', { name, code }); enter(r); } catch (e) { $('homeErr').textContent = e.message; }
+  if (code.length !== 5) { $('homeErr').textContent = 'Enter the 5-letter room code'; return; }
+  if (typeof Peer === 'undefined') { $('homeErr').textContent = 'Could not load the network library — check your internet'; return; }
+  $('homeErr').textContent = 'Connecting to the host…'; $('joinBtn').disabled = true;
+  session = { code, token: null, role: 'guest', name };
+  startGuest();
 };
-function enter(r) {
-  session = { code: r.code, token: r.token };
+function saveSession() {
   localStorage.setItem('uno_session', JSON.stringify(session));
-  history.replaceState(null, '', `/?room=${r.code}`);
-  connect();
+  history.replaceState(null, '', `${location.pathname}?room=${session.code}`);
 }
 function leaveLocal() {
-  if (es) es.close(); es = null; S = null; session = null;
+  if (net.room && session && session.role === 'host') localStorage.removeItem('uno_room_' + session.code);
+  clearTimeout(net.retry); clearTimeout(net.joinTimer);
+  try { net.peer && net.peer.destroy(); } catch {}
+  net = { conns: new Map() }; S = null; session = null;
   localStorage.removeItem('uno_session');
-  history.replaceState(null, '', '/');
-  $('createBox').classList.remove('hidden');
+  history.replaceState(null, '', location.pathname);
+  $('createBox').classList.remove('hidden'); $('joinBtn').disabled = false; banner('');
   document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden'));
   show('home');
 }
 
-// ---------- connection ----------
-function connect() {
-  if (es) es.close();
-  es = new EventSource(`/api/stream?code=${session.code}&token=${session.token}`);
-  es.onmessage = e => { S = JSON.parse(e.data); render(); };
-  es.addEventListener('kicked', () => { toast('You were removed from the room'); leaveLocal(); });
-  es.onerror = async () => {
-    // if the room no longer exists, go home; otherwise EventSource retries itself
-    try {
-      const r = await fetch(`/api/state?code=${session.code}&token=${session.token}`);
-      if (r.status === 400) { const j = await r.json(); toast(j.error); leaveLocal(); }
-    } catch {}
-  };
+// ---------- peer-to-peer networking (host phone = game server) ----------
+const PREFIX = 'uno-nomercy-v1-';
+const PEER_OPTS = { debug: 0, config: { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+] } };
+let net = { conns: new Map() }; // conns: memberId -> Set(DataConnection)
+const sendTo = (conn, obj) => { try { if (conn.open) conn.send(JSON.stringify(obj)); } catch {} };
+
+// ----- HOST -----
+function startHost(room) {
+  net.room = room;
+  const me = room.byToken(session.token);
+  const peer = net.peer = new Peer(PREFIX + room.code, PEER_OPTS);
+  banner('Opening room…');
+  peer.on('open', () => { banner(''); keepAwake(); pushState(); });
+  peer.on('connection', conn => {
+    conn.on('data', raw => { let d; try { d = JSON.parse(raw); } catch { return; } hostHandle(conn, d); });
+    conn.on('close', () => { for (const set of net.conns.values()) set.delete(conn); pushState(); });
+    conn.on('error', () => {});
+  });
+  peer.on('disconnected', () => { banner('Reconnecting…'); setTimeout(() => { try { peer.reconnect(); } catch {} }, 1500); });
+  peer.on('error', err => {
+    if (err.type === 'unavailable-id') { // previous page still registered after a reload — retry
+      banner('Re-opening room…'); try { peer.destroy(); } catch {}
+      net.retry = setTimeout(() => startHost(room), 4000);
+    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
+      banner('Connection problem — retrying…'); net.retry = setTimeout(() => { try { peer.destroy(); } catch {} startHost(room); }, 4000);
+    }
+  });
+  S = room.stateFor(me, () => true); render();
 }
+function hostHandle(conn, d) {
+  const room = net.room;
+  if (d.t === 'join') {
+    let m = d.token && room.byToken(d.token);
+    if (!m) {
+      try { m = room.addMember(d.name); } catch (e) { sendTo(conn, { t: 'joinErr', msg: e.message }); return; }
+    }
+    conn._mid = m.id;
+    if (!net.conns.has(m.id)) net.conns.set(m.id, new Set());
+    net.conns.get(m.id).add(conn);
+    sendTo(conn, { t: 'joined', token: m.token, code: room.code });
+    pushState();
+  } else if (d.t === 'act') {
+    const m = room.members.find(x => x.id === conn._mid);
+    if (!m) return sendTo(conn, { t: 'kicked' });
+    try { dropMembers(room.act(m, d)); } catch (e) { sendTo(conn, { t: 'err', msg: e.message }); return; }
+    pushState();
+  }
+}
+function hostLocalAct(a) {
+  const room = net.room, me = room.byToken(session.token);
+  if (a.type === 'leave') {
+    for (const set of net.conns.values()) for (const c of set) sendTo(c, { t: 'closed' });
+    setTimeout(leaveLocal, 300); return;
+  }
+  try { dropMembers(room.act(me, a)); } catch (e) { toast(e.message); return; }
+  pushState();
+}
+function dropMembers(ids) {
+  for (const id of ids) {
+    for (const c of net.conns.get(id) || []) { sendTo(c, { t: 'kicked' }); setTimeout(() => c.close(), 300); }
+    net.conns.delete(id);
+  }
+}
+function pushState() {
+  const room = net.room; if (!room) return;
+  try { localStorage.setItem('uno_room_' + room.code, JSON.stringify(room)); } catch {}
+  const online = id => id === room.hostId || [...(net.conns.get(id) || [])].some(c => c.open);
+  for (const m of room.members) for (const c of net.conns.get(m.id) || []) sendTo(c, { t: 'state', s: room.stateFor(m, online) });
+  const me = room.byToken(session.token);
+  if (me) { S = room.stateFor(me, online); render(); }
+}
+async function keepAwake() { // the host phone must stay awake: it is the game server
+  try { if ('wakeLock' in navigator) net.wake = await navigator.wakeLock.request('screen'); } catch {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && session && session.role === 'host') keepAwake();
+  if (document.visibilityState === 'visible' && session && session.role === 'guest' && (!net.conn || !net.conn.open)) guestConnect();
+});
+
+// ----- GUEST -----
+function startGuest() {
+  const peer = net.peer = new Peer(PEER_OPTS);
+  peer.on('open', guestConnect);
+  peer.on('disconnected', () => setTimeout(() => { try { peer.reconnect(); } catch {} }, 1500));
+  peer.on('error', err => {
+    if (err.type === 'peer-unavailable') {
+      if (!session.token) { failJoin("Room not found. Check the code — and the host must keep the game open."); }
+      else { banner('Host is offline — waiting for them to come back…'); scheduleRetry(); }
+    } else if (['network', 'server-error', 'socket-error'].includes(err.type)) {
+      banner('Connection problem — retrying…'); scheduleRetry();
+    }
+  });
+}
+function scheduleRetry() { clearTimeout(net.retry); net.retry = setTimeout(guestConnect, 3000); }
+function failJoin(msg) {
+  clearTimeout(net.joinTimer);
+  try { net.peer.destroy(); } catch {}
+  net = { conns: new Map() }; session = null;
+  localStorage.removeItem('uno_session');
+  $('homeErr').textContent = msg; $('joinBtn').disabled = false; show('home');
+}
+function guestConnect() {
+  if (!session || !net.peer) return;
+  if (net.peer.disconnected) { try { net.peer.reconnect(); } catch {} return; }
+  if (!net.peer.open) return;
+  try { net.conn && net.conn.close(); } catch {}
+  const conn = net.conn = net.peer.connect(PREFIX + session.code, { reliable: true });
+  clearTimeout(net.joinTimer);
+  net.joinTimer = setTimeout(() => {
+    if (conn.open) return;
+    if (!session.token) failJoin("Couldn't reach the host. Make sure their game is open, then try again.");
+    else { banner('Still trying to reach the host…'); scheduleRetry(); }
+  }, 15000);
+  conn.on('open', () => {
+    sendTo(conn, { t: 'join', name: session.name || localStorage.getItem('uno_name'), token: session.token });
+  });
+  conn.on('data', raw => {
+    let d; try { d = JSON.parse(raw); } catch { return; }
+    if (d.t === 'joined') { clearTimeout(net.joinTimer); session.token = d.token; saveSession(); banner(''); $('joinBtn').disabled = false; $('homeErr').textContent = ''; }
+    else if (d.t === 'joinErr') failJoin(d.msg);
+    else if (d.t === 'state') { S = d.s; render(); }
+    else if (d.t === 'err') toast(d.msg);
+    else if (d.t === 'kicked') { toast('You were removed from the room'); leaveLocal(); }
+    else if (d.t === 'closed') { toast('The host closed the room'); leaveLocal(); }
+  });
+  conn.on('close', () => { if (session && net.conn === conn) { banner('Lost the host — reconnecting…'); scheduleRetry(); } });
+}
+
+// ----- resume after refresh -----
 (function resume() {
   try {
     const s = JSON.parse(localStorage.getItem('uno_session'));
     const want = params.get('room');
-    if (s && s.code && (!want || want.toUpperCase() === s.code)) { session = s; connect(); }
+    if (!s || !s.code || (want && want.toUpperCase() !== s.code)) return;
+    if (s.role === 'host') {
+      const saved = localStorage.getItem('uno_room_' + s.code);
+      if (!saved) return localStorage.removeItem('uno_session');
+      session = s; startHost(UnoRoom.Room.fromJSON(JSON.parse(saved)));
+    } else if (s.token) { session = s; banner('Reconnecting…'); startGuest(); }
   } catch {}
 })();
 
@@ -385,8 +523,8 @@ $('copyBtn').onclick = copyInvite;
 $('menuInvite').onclick = copyInvite;
 $('waBtn').onclick = () => window.open(`https://wa.me/?text=${encodeURIComponent(`Join my UNO No Mercy game! 🔥 Room ${session.code}\n${inviteLink()}`)}`, '_blank');
 $('startBtn').onclick = () => act('start');
-$('leaveBtn').onclick = () => { act('leave'); leaveLocal(); };
-$('menuLeave').onclick = () => { if (confirm('Leave this game?')) { act('leave'); leaveLocal(); } };
+$('leaveBtn').onclick = () => { if (session.role === 'host' && !confirm('Close the room for everyone?')) return; act('leave'); if (session && session.role !== 'host') setTimeout(leaveLocal, 300); };
+$('menuLeave').onclick = () => { if (!confirm(session.role === 'host' ? 'You are the host — leaving ends the game for everyone. Leave?' : 'Leave this game?')) return; act('leave'); if (session && session.role !== 'host') setTimeout(leaveLocal, 300); };
 $('lminus').onclick = () => act('setMax', { maxPlayers: S.maxPlayers - 1 });
 $('lplus').onclick = () => act('setMax', { maxPlayers: S.maxPlayers + 1 });
 $('menuBtn').onclick = () => {
@@ -416,8 +554,8 @@ function renderLobby() {
   $('startBtn').classList.toggle('hidden', !isHost);
   $('startBtn').disabled = S.players.length < 2;
   $('startBtn').textContent = S.players.length < 2 ? 'Need at least 2 players' : `Start game (${S.players.length} players)`;
-  $('lobbyErr').textContent = isHost ? '' : 'Waiting for the host to start…';
-  $('lobbyErr').style.color = isHost ? '' : 'var(--dim)';
+  $('lobbyErr').textContent = isHost ? 'Keep this screen open — your phone is running the game.' : 'Waiting for the host to start…';
+  $('lobbyErr').style.color = 'var(--dim)';
 }
 $('lobbyList').onclick = e => { const b = e.target.closest('[data-kick2]'); if (b) act('kick', { targetId: b.dataset.kick2 }); };
 
