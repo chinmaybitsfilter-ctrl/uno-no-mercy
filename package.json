@@ -1,7 +1,7 @@
 {
   "name": "uno-no-mercy",
   "version": "1.0.0",
-  "description": "Online multiplayer UNO Show 'Em No Mercy — create a room, invite friends, play from your phones.",
+  "description": "UNO Show 'Em No Mercy — Ludo King style: online rooms, vs computer, pass n play. Phone + laptop.",
   "main": "docs/game.js",
   "scripts": {
     "start": "cd docs && python3 -m http.server 8080",

@@ -44,3 +44,29 @@ for (let game = 0; game < 3000; game++) {
 }
 console.log({ hands, steps, knockouts, wins });
 console.log('ALL INVARIANTS OK');
+
+// ---- Computer players through the Room (what the app actually runs) ----
+const { Room } = require('../docs/room.js');
+let matches = 0, botHands = 0;
+for (let i = 0; i < 400; i++) {
+  const r = new Room('TEST1', 10, { botLevel: i % 2 ? 'easy' : 'hard', turnTime: 30 });
+  const host = r.addMember('Host');
+  const n = 1 + (i % 6);
+  for (let k = 0; k < n; k++) r.addBot();
+  let guard = 0;
+  while (!r.matchWinner) {
+    r.act(host, { type: 'start' }); botHands++;
+    while (r.game.phase === 'playing') {
+      assert(++guard < 200000, 'match stuck');
+      r.syncTimer();
+      const id = r.actorId();
+      assert(r.autoMove(id), 'auto move failed');
+      assert.strictEqual(total(r.game), 168, 'card count changed (bots)');
+    }
+    assert(r.game.result, 'hand ended without a result');
+  }
+  matches++;
+  JSON.parse(JSON.stringify(r)); // must serialise for save/resume
+}
+console.log({ matches, botHands });
+console.log('BOT MATCHES OK');
